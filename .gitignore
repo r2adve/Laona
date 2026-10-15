@@ -1,0 +1,13 @@
+# ESP-IDF 빌드 결과물
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+
+# 미리보기 결과물
+preview/out/
+
+# 편집기, 파이썬
+.vscode/
+__pycache__/
+*.pyc

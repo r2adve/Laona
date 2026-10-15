@@ -1,0 +1,141 @@
+# Laona (라오나)
+
+**ESP32로 만드는 오픈소스 AI 데스크 로봇.** 작은 화면에서 표정을 지으며 반응하고,
+휴대폰으로 말을 걸면 **내 API 키**로 AI가 대답해 라오나 화면에 표정과 글자로 보여줍니다.
+별도 서버 없이 라오나가 직접 AI API를 호출합니다.
+
+> An open-source ESP32 desk robot with an expressive face. Talk to it from your phone's browser;
+> it answers on its own screen using your own AI API key (Claude, ChatGPT, Gemini, or a local LLM).
+> No server required. Documentation is in Korean.
+
+![표정](docs/images/faces_dark.png)
+
+## 주요 기능
+
+- **표정 얼굴** — 이모티콘 얼굴 12가지(`kao`)와 흰 둥근 눈(`eyes`) 두 가지 스타일. 깜빡임, 두리번거림, 숨쉬기, 표정별 애니메이션
+- **휴대폰으로 대화** — 같은 와이파이에서 브라우저로 접속해 말을 걸면, 대답은 라오나 화면 아래 두 줄에 한글로 나옴
+- **내 API 키로 동작 (BYOK)** — Claude, ChatGPT, Gemini, 또는 Ollama·LM Studio 같은 OpenAI 호환 로컬 LLM
+- **서버 없음** — 웹서버와 API 호출이 모두 라오나 안에서 동작
+- **한글 글꼴 내장** — 한글 11,172자 + 자모(ㅋㅋ, ㅠㅠ) + 영문, 회색조 안티에일리어싱
+- **터치 센서 하나로 조작** — 스타일 전환, 흑백 반전, 접속 QR 코드, 화면 끄기/켜기 (하품하고 잠드는 연출)
+- **어린이를 고려한 기본 지시문** — 짧고 다정한 말투, 부적절한 주제 피하기, 개인정보 묻지 않기
+
+![대화 표시](docs/images/chat.png)
+
+## 하드웨어
+
+| 부품 | 예시 |
+|---|---|
+| ESP32-C3 보드 (4MB 플래시, 내장 USB) | ESP32-C3 SuperMini |
+| 1.8" TFT LCD 128x160, SPI | ST7735S 컨트롤러 모듈 |
+| 디지털 터치 센서 | TTP223 (터치하면 High) |
+
+### 배선
+
+| ESP32-C3 | LCD | | ESP32-C3 | 터치 센서 |
+|---|---|---|---|---|
+| GPIO0 | RESET | | GPIO4 | OUT (SIG) |
+| GPIO1 | DC (A0) | | 3.3V | VCC |
+| GPIO2 | CS | | GND | GND |
+| GPIO3 | BL (백라이트) | | | |
+| GPIO8 | SDA (MOSI) | | | |
+| GPIO9 | SCL (SCLK) | | | |
+| 3.3V / GND | VCC / GND | | | |
+
+- LCD 핀 이름의 SDA/SCL 은 I2C 가 아니라 SPI 의 데이터/클럭입니다.
+- 터치 센서가 터치할 때 Low 를 내보내는 설정이면 `main/touch.c` 의 `TOUCH_ACTIVE` 를 `0` 으로 바꾸세요.
+- 빨강/파랑이 바뀌어 보이면 `main/lcd.c` 의 `MADCTL` 값에서 BGR 비트(0x08)를 조정하세요.
+
+## 빌드와 다운로드
+
+[ESP-IDF v5.5](https://docs.espressif.com/projects/esp-idf/) 가 `~/esp/esp-idf` 에 설치되어 있다고 가정합니다.
+
+```bash
+~/esp/esp-idf/install.sh esp32c3   # 처음 한 번 (RISC-V 툴체인)
+make                               # 빌드 (mdns, qrcode 컴포넌트는 자동으로 내려받음)
+./fusing.sh                        # 다운로드 (기본 포트 /dev/ttyACM0)
+```
+
+- 포트가 다르면 `PORT=/dev/ttyUSB0 ./fusing.sh`
+- 콘솔은 내장 USB 로 열립니다: `minicom -D /dev/ttyACM0` (다운로드 전에는 minicom 을 종료)
+
+## 처음 설정
+
+1. **와이파이 연결** — USB 콘솔에서 (한 번만 하면 기억함)
+   ```
+   laona> wifi scan
+   laona> wifi connect <번호 또는 SSID> <비밀번호>
+   ```
+2. **휴대폰으로 접속** — 연결되면 화면에 접속 QR 코드가 나옵니다. 휴대폰 카메라로 찍으면 바로 열립니다.
+   언제든 터치 센서를 **세 번** 빠르게 누르면 다시 볼 수 있습니다. (`http://laona.local` 도 됩니다. 안드로이드는 안 될 수 있음)
+3. **AI 설정** — 대화 페이지 오른쪽 위 ⚙ → 설정 비밀번호 만들기 → 서비스, 모델, API 키 입력 → 저장
+4. 대화 페이지에서 말을 걸면 라오나 화면에 대답이 나옵니다.
+
+> **API 요금 주의** — 사용 요금은 키 주인의 계정에 청구됩니다. 아이들은 오래 대화하는 경우가 많으니
+> 꼭 API 계정에 **월 사용 한도**를 정해 두세요. 저렴하게 쓰려면 가벼운 모델(예: `claude-haiku-5-5`)을 고르세요.
+
+## 터치 조작
+
+| 동작 | 결과 |
+|---|---|
+| 한 번 | 얼굴 스타일 바꾸기 (kao ↔ eyes) |
+| 빠르게 두 번 | 흑백 반전 (스타일을 바꿔도 유지) |
+| 빠르게 세 번 | 휴대폰 접속 QR 코드 (아무 터치나 하면 닫힘) |
+| 1.5초 이상 누름 | 화면 끄기 (하품 → 잠들기 → 위아래로 닫힘) / 다시 누르면 켜기 |
+
+![화면 끄기와 켜기](docs/images/screen_onoff.png)
+
+## 콘솔 명령
+
+| 명령 | 설명 |
+|---|---|
+| `laona` | 상태 (스타일, 표정, 프레임 시간) |
+| `laona <표정>` | normal happy surprised dizzy cry sad wink sleepy angry stare tongue meh glance |
+| `laona style kao\|eyes`, `laona invert`, `laona flip` | 스타일, 흑백 반전, 화면 180도 회전 |
+| `laona screen on\|off`, `laona qr` | 화면 끄기/켜기, 접속 QR |
+| `laona say <표정> <말>` | API 없이 대답 표시 시험 |
+| `chat <말>` / `chat forget` | 콘솔에서 말 걸기 (영문만) / 대화 기억 지우기 |
+| `setup` / `setup reset` | AI 설정 보기 (키는 표시 안 함) / 설정과 비밀번호 초기화 |
+| `wifi scan\|connect\|status\|disconnect\|forget` | 와이파이 |
+| `hello`, `ver`, `lcdout <색>` | 인사, 버전, 화면 단색 채우기 |
+
+## 프로젝트 구조
+
+```
+main/
+  face.c      얼굴 태스크 (25fps), 표정·스타일·화면 끄기 연출, QR 화면, 콘솔 laona 명령
+  kao.c       이모티콘 얼굴 그리기 (안티에일리어싱 선, 순수 C)
+  eyes.c      흰 둥근 눈 얼굴 (순수 C)
+  seq.c       화면 끄기/켜기 연출 시간표 (순수 C)
+  text.c      아래 두 줄 한글 글자 영역 (순수 C)
+  llm.c       AI API 호출 (Claude / OpenAI 형식), 대화 기억
+  web.c       휴대폰용 웹서버, mDNS, 접속 QR
+  config.c    AI 설정과 설정 비밀번호 (NVS)
+  lcd.c       ST7735S SPI 드라이버
+  touch.c     터치 제스처 (1/2/3번, 길게)
+  wifi.c      와이파이 연결과 콘솔 명령
+  chat.html, settings.html   휴대폰 페이지
+  font.bin    한글 비트맵 글꼴 (tools/make_font.py 로 생성)
+preview/      PC 에서 같은 그리기 코드로 GIF/PNG 미리보기 (make)
+tools/        글꼴 생성기
+```
+
+`kao.c`, `eyes.c`, `seq.c`, `text.c` 는 ESP-IDF 에 의존하지 않아 PC 에서 그대로 컴파일됩니다.
+얼굴이나 화면을 바꿀 때는 `preview/` 에서 `make` 로 GIF 를 먼저 확인하세요.
+
+## 보안과 안전
+
+- API 키는 라오나(NVS)에만 저장되고 웹 페이지로 다시 보내지 않습니다.
+- 설정 페이지는 비밀번호로 보호되지만 **집 와이파이 안에서 암호화 없이(http)** 주고받습니다. 공용 와이파이에서 설정하지 마세요.
+- 기기를 남에게 줄 때는 `setup reset` 으로 키를 지우세요. (플래시 암호화는 아직 기본으로 켜져 있지 않습니다)
+- 라오나는 어린이가 사용할 수 있으므로 지시문에 안전 규칙이 들어 있지만, AI 의 대답이 항상 적절하다고 보장할 수는 없습니다. 보호자의 관심이 필요합니다.
+
+## 앞으로
+
+- 휴대폰으로 와이파이 설정 (USB 콘솔 없이)
+- ESP32-S3 지원, 마이크·스피커
+- 같은 와이파이의 라오나끼리 함께 대화
+
+## 라이선스
+
+[GNU General Public License v3.0](LICENSE). 포함된 글꼴과 라이브러리의 라이선스는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 를 보세요.

@@ -1,0 +1,22 @@
+CONFIG_IDF_TARGET="esp32c3"
+
+# C3 초소형 모듈 (SuperMini 등) 은 4MB 플래시
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# 콘솔: 칩 내장 USB (USB Serial/JTAG, /dev/ttyACM0)
+# USB-UART 칩이 달린 보드면 이 줄을 CONFIG_ESP_CONSOLE_UART_DEFAULT=y 로 바꿀 것
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# 얼굴 그리기 속도를 위해 -O2 최적화
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# 한글 글꼴을 넣기 위해 앱 영역을 키운 파티션 (partitions.csv)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# HTTPS (API 호출) 버퍼를 필요할 때만 잡아 RAM 절약
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+
+# 재부팅해도 공유기에 지난번 IP 를 다시 요청 (접속 주소가 잘 바뀌지 않게)
+CONFIG_LWIP_DHCP_RESTORE_LAST_IP=y
+CONFIG_LWIP_LOCAL_HOSTNAME="laona"

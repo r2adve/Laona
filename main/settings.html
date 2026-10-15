@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>라오나 설정</title>
+<style>
+:root { --bg:#f6f4fb; --card:#fff; --ink:#26222e; --muted:#7a7486; --accent:#7b5cff; --line:#e4dff0; --bad:#d93a5b; --good:#1f9d6b; }
+@media (prefers-color-scheme: dark) { :root { --bg:#141218; --card:#1f1c25; --ink:#eeeaf5; --muted:#9a93a8; --line:#2e2a36; } }
+* { box-sizing:border-box; }
+body { margin:0; font-family:-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif; background:var(--bg); color:var(--ink); }
+header { display:flex; align-items:center; gap:12px; padding:14px 16px; background:var(--card); border-bottom:1px solid var(--line); }
+header h1 { font-size:18px; margin:0; } header a { color:var(--muted); text-decoration:none; font-size:20px; }
+main { max-width:520px; margin:0 auto; padding:16px; }
+section { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+h2 { font-size:16px; margin:0 0 12px; }
+label { display:block; font-size:14px; color:var(--muted); margin:12px 0 6px; }
+input, select { width:100%; font-size:16px; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--ink); }
+button { margin-top:14px; width:100%; font-size:16px; padding:12px; border:0; border-radius:10px; background:var(--accent); color:#fff; }
+button.sub { background:transparent; color:var(--accent); border:1px solid var(--line); }
+.hint { font-size:13px; color:var(--muted); margin-top:6px; line-height:1.5; }
+.msg { font-size:14px; margin-top:10px; min-height:18px; }
+.msg.bad { color:var(--bad); } .msg.good { color:var(--good); }
+.hidden { display:none; }
+</style>
+</head>
+<body>
+<header><a href="/" aria-label="대화로">←</a><h1>라오나 설정</h1></header>
+<main>
+<section id="create" class="hidden">
+  <h2>설정 비밀번호 만들기</h2>
+  <p class="hint">이 페이지를 보호할 비밀번호예요. 같은 와이파이의 다른 사람이 API 키를 바꾸지 못하게 해요.</p>
+  <label>새 비밀번호 (4자 이상)</label><input id="c1" type="password" autocomplete="new-password">
+  <label>한 번 더</label><input id="c2" type="password" autocomplete="new-password">
+  <button onclick="create()">만들기</button><div class="msg" id="cm"></div>
+</section>
+
+<section id="login" class="hidden">
+  <h2>비밀번호 입력</h2>
+  <input id="lp" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+  <button onclick="login()">확인</button><div class="msg" id="lm"></div>
+</section>
+
+<div id="panel" class="hidden">
+<section>
+  <h2>AI 연결</h2>
+  <label>서비스</label>
+  <select id="provider" onchange="sync(true)">
+    <option value="anthropic">Claude (Anthropic)</option>
+    <option value="chatgpt">ChatGPT (OpenAI)</option>
+    <option value="gemini">Gemini (Google)</option>
+    <option value="openai">직접 입력 (Ollama, LM Studio 등 OpenAI 호환)</option>
+  </select>
+  <div class="hint" id="keyhelp"></div>
+  <div id="urlbox">
+    <label>API 주소</label><input id="base_url" placeholder="https://api.openai.com/v1">
+    <div class="hint">Ollama 를 PC 에서 쓸 때는 http://PC주소:11434/v1</div>
+  </div>
+  <label>모델</label><input id="model" list="models">
+  <datalist id="models"></datalist>
+  <div class="hint" id="modelhint"></div>
+  <label>API 키</label><input id="api_key" type="password" autocomplete="off">
+  <div class="hint">키는 이 라오나 기기에만 저장되고 다시 보여 주지 않아요. 사용 요금은 키 주인의 계정에 청구되니, API 계정에 <b>월 사용 한도</b>를 꼭 정해 두세요.</div>
+  <button onclick="save()">저장</button><div class="msg" id="sm"></div>
+</section>
+
+<section>
+  <h2>대화 기억</h2>
+  <p class="hint">라오나는 최근 대화 몇 개만 기억해요. 전원을 끄면 사라져요.</p>
+  <button class="sub" onclick="forget()">대화 기억 지우기</button><div class="msg" id="fm"></div>
+</section>
+
+<section>
+  <h2>비밀번호 바꾸기</h2>
+  <label>새 비밀번호</label><input id="np" type="password" autocomplete="new-password">
+  <button class="sub" onclick="chpw()">바꾸기</button><div class="msg" id="pm"></div>
+</section>
+<p class="hint">이 페이지는 집 와이파이 안에서 암호화 없이(http) 주고받아요. 공용 와이파이에서는 설정하지 마세요.</p>
+</div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let pw = '';
+// 첫 번째가 서비스를 고를 때 기본 모델. 목록에 없는 모델은 직접 입력하면 됨
+const MODELS = {
+  anthropic: [['claude-opus-5-5', '가장 똑똑해요'], ['claude-sonnet-5-5', '빠르고 똑똑해요'], ['claude-haiku-5-5', '가장 저렴하고 빨라요']],
+  chatgpt: [['gpt-6.1-sol', '성능과 가격의 균형'], ['gpt-6-astra', '가장 똑똑해요'], ['gpt-6-luna', '가장 저렴하고 빨라요']],
+  gemini: [['gemini-3.7-flash', '빠르고 똑똑해요'], ['gemini-4-argon', '가장 똑똑해요'], ['gemini-3.5-flash-lite', '가장 저렴하고 빨라요']],
+  openai: [],
+};
+const KEYHELP = {
+  anthropic: 'API 키는 console.anthropic.com 에서 발급받아요.',
+  chatgpt: 'API 키는 platform.openai.com 에서 발급받아요. (ChatGPT 구독과는 별도로 요금이 나가요)',
+  gemini: 'API 키는 aistudio.google.com 에서 발급받아요.',
+  openai: 'PC 에서 돌리는 Ollama, LM Studio 같은 서비스의 주소를 입력해요. 키가 없으면 비워 두세요.',
+};
+function show(id) { ['create', 'login', 'panel'].forEach(x => $(x).classList.toggle('hidden', x !== id)); }
+function msg(id, text, good) { $(id).textContent = text; $(id).className = 'msg ' + (good ? 'good' : 'bad'); }
+// changed: 사용자가 서비스를 바꿨을 때 (기본 모델로 채우고 키 입력을 비움)
+function sync(changed) {
+  const p = $('provider').value, list = MODELS[p];
+  $('urlbox').classList.toggle('hidden', p !== 'openai');
+  $('keyhelp').textContent = KEYHELP[p];
+  $('models').innerHTML = list.map(m => `<option value="${m[0]}">${m[1]}</option>`).join('');
+  $('modelhint').textContent = list.length
+    ? '목록: ' + list.map(m => `${m[0]} (${m[1]})`).join(', ') + '. 다른 모델 이름도 직접 입력할 수 있어요.'
+    : '예: llama3.1, qwen2.5 (Ollama 에 설치한 모델 이름)';
+  if (changed) {
+    $('model').value = list.length ? list[0][0] : '';
+    $('api_key').value = '';
+    $('api_key').placeholder = '이 서비스의 키를 입력하세요';
+  }
+}
+async function api(path, body) {
+  const r = await fetch(path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-Laona-Password': pw }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || '오류가 났어요');
+  return j;
+}
+async function load() {
+  const c = await api('/api/config');
+  $('provider').value = c.provider; sync();
+  $('model').value = c.model; $('base_url').value = c.base_url;
+  $('api_key').value = ''; $('api_key').placeholder = c.key_hint ? `저장됨: ${c.key_hint} (바꿀 때만 입력)` : '키를 입력하세요';
+  show('panel');
+}
+async function create() {
+  if ($('c1').value !== $('c2').value) return msg('cm', '두 비밀번호가 달라요.');
+  try { await api('/api/password', { new: $('c1').value }); pw = $('c1').value; await load(); } catch (e) { msg('cm', e.message); }
+}
+async function login() {
+  pw = $('lp').value;
+  try { await load(); } catch (e) { msg('lm', e.message); }
+}
+async function save() {
+  try {
+    await api('/api/config', { provider: $('provider').value, model: $('model').value.trim(), base_url: $('base_url').value.trim(), api_key: $('api_key').value.trim() });
+    msg('sm', '저장했어요. 대화 페이지에서 말을 걸어 보세요!', true); await load();
+  } catch (e) { msg('sm', e.message); }
+}
+async function forget() { try { await api('/api/forget', {}); msg('fm', '지웠어요.', true); } catch (e) { msg('fm', e.message); } }
+async function chpw() {
+  try { await api('/api/password', { old: pw, new: $('np').value }); pw = $('np').value; $('np').value = ''; msg('pm', '바꿨어요.', true); } catch (e) { msg('pm', e.message); }
+}
+fetch('/api/state').then(r => r.json()).then(s => show(s.has_password ? 'login' : 'create'));
+sync();
+</script>
+</body>
+</html>

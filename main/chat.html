@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>라오나와 대화</title>
+<style>
+:root { --bg:#f6f4fb; --card:#fff; --ink:#26222e; --muted:#7a7486; --accent:#7b5cff; --me:#7b5cff; --line:#e4dff0; }
+@media (prefers-color-scheme: dark) { :root { --bg:#141218; --card:#1f1c25; --ink:#eeeaf5; --muted:#9a93a8; --line:#2e2a36; } }
+* { box-sizing:border-box; }
+body { margin:0; font-family:-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif; background:var(--bg); color:var(--ink);
+       display:flex; flex-direction:column; height:100dvh; }
+header { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--card); border-bottom:1px solid var(--line); }
+header h1 { font-size:18px; margin:0; }
+header a { color:var(--muted); text-decoration:none; font-size:22px; }
+#log { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px; }
+.me { align-self:flex-end; max-width:80%; background:var(--me); color:#fff; padding:9px 13px; border-radius:16px 16px 4px 16px; word-break:break-all; }
+.note { align-self:center; color:var(--muted); font-size:13px; text-align:center; }
+.note a { color:var(--accent); }
+#status { padding:6px 16px; color:var(--muted); font-size:14px; min-height:28px; text-align:center; }
+form { display:flex; gap:8px; padding:10px 12px calc(10px + env(safe-area-inset-bottom)); background:var(--card); border-top:1px solid var(--line); }
+input { flex:1; font-size:16px; padding:11px 14px; border-radius:22px; border:1px solid var(--line); background:var(--bg); color:var(--ink); outline:none; }
+button { font-size:16px; padding:0 18px; border:0; border-radius:22px; background:var(--accent); color:#fff; }
+button:disabled { opacity:.45; }
+</style>
+</head>
+<body>
+<header><h1>라오나와 대화</h1><a href="/settings" aria-label="설정">⚙</a></header>
+<div id="log"><div class="note">라오나의 대답은 라오나 화면에 나와요 👀</div></div>
+<div id="status"></div>
+<form id="f"><input id="t" maxlength="200" placeholder="라오나에게 말 걸기" autocomplete="off"><button id="b">보내기</button></form>
+<script>
+const log = document.getElementById('log'), st = document.getElementById('status');
+const t = document.getElementById('t'), b = document.getElementById('b');
+function add(cls, html) { const d = document.createElement('div'); d.className = cls; d.innerHTML = html; log.appendChild(d); log.scrollTop = log.scrollHeight; }
+function esc(s) { return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+async function state() { return (await fetch('/api/state')).json(); }
+async function wait() {
+  b.disabled = true; st.textContent = '라오나가 생각 중이에요…';
+  for (;;) {
+    await new Promise(r => setTimeout(r, 800));
+    const s = await state().catch(() => null);
+    if (s && !s.busy) {
+      st.textContent = s.status === 'ok' ? '라오나 화면을 봐 주세요 👀' : (s.status || '');
+      break;
+    }
+  }
+  b.disabled = false; t.focus();
+}
+document.getElementById('f').onsubmit = async e => {
+  e.preventDefault();
+  const text = t.value.trim();
+  if (!text || b.disabled) return;
+  add('me', esc(text)); t.value = '';
+  const r = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text}) }).catch(() => null);
+  if (!r) { st.textContent = '라오나에게 연결할 수 없어요.'; return; }
+  if (r.ok) return wait();
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 412) add('note', esc(j.error) + ' <a href="/settings">설정 열기</a>');
+  else st.textContent = j.error || '보내지 못했어요.';
+};
+state().then(s => {
+  if (!s.configured) add('note', '먼저 API 키를 등록해야 대화할 수 있어요. <a href="/settings">설정 열기</a>');
+  if (s.busy) wait();
+});
+</script>
+</body>
+</html>
