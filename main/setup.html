@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>라오나 와이파이 설정</title>
+<style>
+:root { --bg:#f6f4fb; --card:#fff; --ink:#26222e; --muted:#7a7486; --accent:#7b5cff; --line:#e4dff0; --bad:#d93a5b; --good:#1f9d6b; }
+@media (prefers-color-scheme: dark) { :root { --bg:#141218; --card:#1f1c25; --ink:#eeeaf5; --muted:#9a93a8; --line:#2e2a36; } }
+* { box-sizing:border-box; }
+body { margin:0; font-family:-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif; background:var(--bg); color:var(--ink); }
+header { padding:14px 16px; background:var(--card); border-bottom:1px solid var(--line); }
+header h1 { font-size:18px; margin:0; }
+main { max-width:520px; margin:0 auto; padding:16px; }
+section { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+.head { display:flex; justify-content:space-between; align-items:center; }
+h2 { font-size:16px; margin:0; }
+#list { list-style:none; margin:8px 0 0; padding:0; }
+#list li { display:flex; align-items:center; gap:10px; padding:12px 4px; border-top:1px solid var(--line); cursor:pointer; }
+#list li:first-child { border-top:0; }
+#list li.sel { color:var(--accent); font-weight:600; }
+#list .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#list .meta { color:var(--muted); font-size:13px; white-space:nowrap; }
+label { display:block; font-size:14px; color:var(--muted); margin:12px 0 6px; }
+input[type=text], input[type=password] { width:100%; font-size:16px; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--ink); }
+.show { display:flex; align-items:center; gap:6px; margin-top:8px; }
+button { font-size:16px; cursor:pointer; }
+.link { background:none; border:0; color:var(--accent); padding:4px 0; }
+.primary { margin-top:14px; width:100%; padding:12px; border:0; border-radius:10px; background:var(--accent); color:#fff; }
+.primary:disabled { opacity:.5; }
+.hint { font-size:13px; color:var(--muted); margin-top:6px; line-height:1.5; }
+#status { display:none; line-height:1.6; white-space:pre-line; }
+#status.good { color:var(--good); font-weight:600; } #status.bad { color:var(--bad); font-weight:600; }
+#status a { color:var(--accent); }
+</style>
+</head>
+<body>
+<header><h1>라오나 와이파이 설정</h1></header>
+<main>
+<section>
+  <div class="head"><h2>집 와이파이 고르기</h2><button class="link" id="rescan" type="button">다시 찾기</button></div>
+  <ul id="list"></ul>
+  <div class="hint" id="listmsg">찾는 중...</div>
+  <div class="hint">라오나는 2.4GHz 와이파이만 쓸 수 있어요. (이름에 5G 가 붙은 와이파이는 안 돼요)</div>
+</section>
+
+<form id="form"><section>
+  <label for="ssid">와이파이 이름</label>
+  <input type="text" id="ssid" maxlength="32" required autocomplete="off" autocapitalize="none">
+  <label for="password">비밀번호</label>
+  <input type="password" id="password" maxlength="64" autocomplete="off">
+  <label class="show"><input type="checkbox" id="showpw"> 비밀번호 보기</label>
+  <button class="primary" id="submit" type="submit">연결</button>
+</section></form>
+
+<section id="status"></section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const REASON = {
+  2: '비밀번호를 확인해 주세요.',
+  15: '비밀번호가 틀렸어요.',
+  201: '와이파이를 찾지 못했어요. 이름과 거리를 확인해 주세요.',
+  202: '비밀번호를 확인해 주세요.',
+  204: '비밀번호가 틀렸어요.',
+};
+const bars = r => r >= -55 ? '▂▄▆█' : r >= -67 ? '▂▄▆' : r >= -78 ? '▂▄' : '▂';
+
+function scan() {
+  $('list').innerHTML = '';
+  $('listmsg').textContent = '찾는 중...';
+  $('listmsg').style.display = '';
+  fetch('/api/scan').then(r => r.json()).then(aps => {
+    if (!aps.length) { $('listmsg').textContent = '찾은 와이파이가 없어요.'; return; }
+    $('listmsg').style.display = 'none';
+    aps.forEach(ap => {
+      const li = document.createElement('li'), name = document.createElement('span'), meta = document.createElement('span');
+      name.className = 'name'; meta.className = 'meta';
+      name.textContent = ap.ssid;
+      meta.textContent = (ap.secure ? '🔒 ' : '') + bars(ap.rssi);
+      li.append(name, meta);
+      li.onclick = () => {
+        for (const x of $('list').children) x.className = '';
+        li.className = 'sel';
+        $('ssid').value = ap.ssid;
+        $('password').value = '';
+        if (ap.secure) $('password').focus();
+      };
+      $('list').appendChild(li);
+    });
+  }).catch(() => { $('listmsg').textContent = '찾지 못했어요. 다시 찾기를 눌러 주세요.'; });
+}
+
+function status(text, cls) {
+  const s = $('status');
+  s.style.display = 'block';
+  s.className = cls || '';
+  s.textContent = text;
+}
+
+let errors = 0;
+function poll() {
+  fetch('/api/status').then(r => r.json()).then(st => {
+    errors = 0;
+    if (st.state === 'connected') {
+      const url = 'http://' + st.ip + '/';
+      status('연결됐어요!\n휴대폰이 집 와이파이로 돌아가면 라오나 화면의 QR 을 찍거나 아래 주소로 들어가세요.\n', 'good');
+      const a = document.createElement('a');
+      a.href = url; a.textContent = url;
+      $('status').appendChild(a);
+      return;
+    }
+    if (st.state === 'failed') {
+      status(REASON[st.reason] || ('연결하지 못했어요. (코드 ' + st.reason + ')'), 'bad');
+      $('submit').disabled = false;
+      return;
+    }
+    status('연결하는 중...');
+    setTimeout(poll, 1500);
+  }).catch(() => {
+    /* 라오나가 공유기 채널로 옮기는 동안 설정 와이파이가 잠깐 끊길 수 있음 */
+    if (++errors >= 5) status('라오나와 잠깐 연결이 끊겼어요. 결과는 라오나 화면에서 볼 수 있어요.');
+    setTimeout(poll, 2000);
+  });
+}
+
+$('form').onsubmit = e => {
+  e.preventDefault();
+  $('submit').disabled = true;
+  status('연결하는 중...');
+  const body = 'ssid=' + encodeURIComponent($('ssid').value) + '&password=' + encodeURIComponent($('password').value);
+  fetch('/api/connect', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
+    .finally(() => setTimeout(poll, 1500));
+};
+$('showpw').onchange = e => { $('password').type = e.target.checked ? 'text' : 'password'; };
+$('rescan').onclick = scan;
+scan();
+</script>
+</body>
+</html>

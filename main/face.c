@@ -15,9 +15,11 @@
  *   laona color <color>    : eyes 스타일 눈 색 (lcdout 과 같은 색 이름 또는 RRGGBB)
  *   laona flip             : 화면 180도 회전
  *   laona say <표정> <말>  : 표정을 짓고 화면 아래에 말을 보여줌 (대답 표시 시험용)
- *   laona qr               : 휴대폰 접속 주소 QR 코드 (터치 세 번과 같음)
+ *   laona qr               : 대화창 접속 주소 QR 코드 (버튼 한 번과 같음, 와이파이에 연결되어 있을 때만)
  *   laona screen [on|off]  : 화면 끄기/켜기. 인자 없으면 전환
  *                            끌 때는 하품하고 잠든 뒤 위아래에서 닫히고, 켤 때는 중앙에서 열린다
+ *
+ * 와이파이에 연결되어 있으면 오른쪽 위에 작은 와이파이 아이콘 (바탕의 반대색)
  */
 #include <stdio.h>
 #include <string.h>
@@ -34,6 +36,7 @@
 #include "eyes.h"
 #include "seq.h"
 #include "text.h"
+#include "icon.h"
 #include "web.h"
 #include "qrcode.h"
 #include "laona.h"
@@ -42,8 +45,9 @@
 #define TEXT_LIFT 16      /* 아래 글자가 나올 때 얼굴을 올리는 높이 (px) */
 #define C_INK     LCD_RGB(40, 36, 48)   /* kao.c 의 선 색과 같음 */
 
-#define QR_MAX    37      /* QR 버전 5 까지 (주소는 버전 2 면 충분) */
-#define QR_QUIET  2       /* QR 둘레 여백 (모듈 수) */
+#define QR_MAX    37      /* QR 버전 5 까지 (주소는 버전 2, 와이파이 QR 은 버전 3) */
+#define QR_QUIET  1       /* 크기를 정할 때 둘 QR 둘레 여백 (모듈 수). 화면 전체가 흰 바탕이라 1 이면 충분하고,
+                           * 그래야 와이파이 QR (버전 3) 도 3배 크기로 그려짐 */
 
 /* tools/make_font.py 로 만든 한글 글꼴 (main/CMakeLists.txt 의 EMBED_FILES) */
 extern const uint8_t font_start[] asm("_binary_font_bin_start");
@@ -81,6 +85,7 @@ static uint8_t s_qr[QR_MAX * QR_MAX];  /* QR 모듈 (1 = 검정) */
 static int s_qr_size, s_qr_left_ms;   /* QR 한 변 모듈 수, 남은 표시 시간 (0 이면 안 보임) */
 static char s_qr_caption[2][40];
 static float s_lift;                  /* 얼굴을 올린 정도 (px) */
+static volatile bool s_wifi;          /* 와이파이 연결됨 -> 아이콘 */
 
 static bool set_expr(const char *name);
 static void set_auto(bool on);
@@ -144,7 +149,9 @@ static void face_task(void *arg)
                 } else {
                     eyes_render();
                 }
-                text_render(s_fb, KAO_W, KAO_H, s_invert ? 0xFFFF : C_INK, s_invert ? 0x0000 : 0xFFFF);
+                uint16_t fg = s_invert ? 0xFFFF : C_INK;
+                text_render(s_fb, KAO_W, KAO_H, fg, s_invert ? 0x0000 : 0xFFFF);
+                if (s_wifi) icon_draw_wifi(s_fb, KAO_W, KAO_H, KAO_W - ICON_WIFI_W - 3, 3, fg);
             }
             if (in_seq) {
                 seq_draw_shutter(s_fb, KAO_W, KAO_H, sq.shutter);
@@ -291,15 +298,35 @@ void face_thinking(bool on)
     xSemaphoreGive(s_lock);
 }
 
-void face_say(const char *emotion, const char *text)
+/* ms 가 0 이면 글자 길이에 맞춰 보여줌 */
+static void say(const char *emotion, const char *text, int ms)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_paused = false;
     s_qr_left_ms = 0;
     if (s_screen_off) set_screen(true);
     if (emotion) set_expr(emotion);
-    text_show(text);
+    if (ms > 0) {
+        text_show_ms(text, ms);
+    } else {
+        text_show(text);
+    }
     xSemaphoreGive(s_lock);
+}
+
+void face_say(const char *emotion, const char *text)
+{
+    say(emotion, text, 0);
+}
+
+void face_say_ms(const char *emotion, const char *text, int ms)
+{
+    say(emotion, text, ms);
+}
+
+void face_set_wifi(bool connected)
+{
+    s_wifi = connected;
 }
 
 /* 꺼졌거나 꺼지는 중이면 false */

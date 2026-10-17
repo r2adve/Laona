@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include "esp_err.h"
 
 /* 얼굴 애니메이션 태스크 시작 (lcd_init 이후 호출) */
@@ -22,5 +23,9 @@ bool face_qr_shown(void);
 /* LLM 대답 표시: 생각 중 표시, 표정 + 아래 두 줄 글자 */
 void face_thinking(bool on);
 void face_say(const char *emotion, const char *text);
+void face_say_ms(const char *emotion, const char *text, int ms);   /* 글자를 ms 동안만 */
+
+/* 오른쪽 위 와이파이 연결 아이콘 */
+void face_set_wifi(bool connected);
 
 void face_register_commands(void);

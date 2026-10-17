@@ -193,7 +193,7 @@ static const char *error_text(int status)
     case 401:
     case 403: return "API 키가 맞지 않아요. 설정을 확인해 주세요.";
     case 404: return "모델 이름을 찾을 수 없어요. 설정을 확인해 주세요.";
-    case 429: return "지금은 너무 많이 불렀어요. 조금 뒤에 다시 말해 줘요.";
+    case 429: return "사용량이 다 찼어요. 조금 뒤에 다시 말해 줘요. (무료 키는 내일)";
     default:
         return status >= 500 ? "서버가 바빠요. 잠시 뒤에 다시 말해 줘요." : "말하다가 문제가 생겼어요. 설정을 확인해 주세요.";
     }

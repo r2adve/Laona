@@ -21,6 +21,7 @@ static int s_len;
 static int s_line_start[MAX_LINES + 1];   /* 줄마다 시작 위치 */
 static int s_nlines;
 static int s_page, s_page_t;              /* 지금 보여주는 쪽, 그 쪽을 보여준 시간 */
+static int s_total_ms;                    /* 0 이 아니면 이 시간만큼만 표시 (text_show_ms) */
 static bool s_showing, s_thinking;
 static int s_think_t;
 
@@ -119,8 +120,15 @@ void text_show(const char *utf8)
     wrap(160 - MARGIN * 2);
     s_page = 0;
     s_page_t = 0;
+    s_total_ms = 0;
     s_thinking = false;
     s_showing = s_nlines > 0;
+}
+
+void text_show_ms(const char *utf8, int ms)
+{
+    text_show(utf8);
+    s_total_ms = ms;
 }
 
 void text_thinking(bool on)
@@ -151,6 +159,10 @@ void text_update(int dt_ms)
     s_think_t += dt_ms;
     if (!s_showing) return;
     s_page_t += dt_ms;
+    if (s_total_ms > 0) {
+        if (s_page_t >= s_total_ms) s_showing = false;
+        return;
+    }
     int npages = (s_nlines + 1) / 2;
     int dur = PAGE_MS + page_chars(s_page) * CHAR_MS;
     if (s_page + 1 < npages) {

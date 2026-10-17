@@ -133,6 +133,7 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 #endif
 
-    /* 저장된 WiFi 설정이 있으면 자동 연결 */
+    /* 저장된 와이파이가 있으면 화면 표시 없이 연결 시도 (실패하면 와이파이를 끔).
+     * 와이파이 설정 QR 은 버튼을 3초 눌렀을 때만 (touch.c) */
     wifi_autoconnect();
 }

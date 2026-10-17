@@ -21,12 +21,16 @@
 #include "llm.h"
 #include "web.h"
 #include "wifi.h"
+#include "wifi_setup.h"
 #include "face.h"
 
 #define BODY_MAX 1024
 
-extern const char chat_html[] asm("_binary_chat_html_start");
-extern const char settings_html[] asm("_binary_settings_html_start");
+/* gzip 으로 줄인 페이지 (main/CMakeLists.txt) */
+extern const uint8_t chat_gz_start[] asm("_binary_chat_html_gz_start");
+extern const uint8_t chat_gz_end[] asm("_binary_chat_html_gz_end");
+extern const uint8_t settings_gz_start[] asm("_binary_settings_html_gz_start");
+extern const uint8_t settings_gz_end[] asm("_binary_settings_html_gz_end");
 
 static httpd_handle_t s_server;
 
@@ -83,16 +87,27 @@ static bool authorized(httpd_req_t *req)
     return false;
 }
 
-static esp_err_t page_chat(httpd_req_t *req)
+static esp_err_t send_page(httpd_req_t *req, const uint8_t *start, const uint8_t *end)
 {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
-    return httpd_resp_sendstr(req, chat_html);
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    return httpd_resp_send(req, (const char *)start, end - start);
+}
+
+static esp_err_t page_chat(httpd_req_t *req)
+{
+    /* 휴대폰이 대화창에 접속하면 접속 QR 을 닫고 바로 얼굴로 */
+    if (face_qr_shown()) {
+        face_hide_qr();
+        printf("[Web] chat page opened -> close QR\n");
+    }
+    return send_page(req, chat_gz_start, chat_gz_end);
 }
 
 static esp_err_t page_settings(httpd_req_t *req)
 {
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    return httpd_resp_sendstr(req, settings_html);
+    return send_page(req, settings_gz_start, settings_gz_end);
 }
 
 static esp_err_t api_state(httpd_req_t *req)
@@ -199,19 +214,28 @@ static esp_err_t api_forget(httpd_req_t *req)
     return send_json(req, "200 OK", cJSON_CreateObject());
 }
 
-#define QR_SHOW_MS 30000
+#define QR_SHOW_MS 60000      /* 휴대폰이 접속하지 않으면 1분 뒤 얼굴로 */
 
 void web_show_address(void)
 {
     char ip[16], url[32];
     if (!wifi_get_ip(ip, sizeof(ip))) {
-        face_say("sad", "와이파이에 연결되어 있지 않아요.");
+        /* 와이파이 설정은 버튼 3초로만 시작 */
+        printf("[Web] WiFi not connected (hold button 3s for WiFi setup)\n");
         return;
     }
     /* laona.local 은 안드로이드에서 안 될 수 있어 IP 주소로 */
     snprintf(url, sizeof(url), "http://%s/", ip);
     face_show_qr(url, "카메라로 찍어 접속하세요", ip, QR_SHOW_MS);
     printf("[Web] %s\n", url);
+}
+
+void web_stop(void)
+{
+    if (!s_server) return;
+    httpd_stop(s_server);
+    s_server = NULL;
+    printf("[Web] stopped\n");
 }
 
 void web_start(void)

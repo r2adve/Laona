@@ -4,13 +4,20 @@
  *   wifi connect <ssid | scan 번호> [password]
  *   wifi disconnect
  *   wifi status
+ *   wifi txpower [dBm]
  *   wifi forget
+ *   wifi setup [stop]
  *
- * 연결에 성공한 설정은 NVS 에 저장되어 다음 부팅 때 자동 연결된다.
+ * 연결에 성공한 설정은 NVS 에 저장되어 다음 부팅 때 화면 표시 없이 다시 연결한다.
+ * 연결하지 못하거나 (재시도 초과) 쓰는 중에 끊기면 와이파이를 끈다. 설정 QR 은 띄우지 않는다.
+ * 휴대폰 설정 모드 (wifi_setup.c) 는 버튼을 3초 눌렀을 때만 켜진다 (touch.c).
+ * 연결되어 있는 동안 화면 오른쪽 위에 와이파이 아이콘.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_console.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -20,10 +27,14 @@
 #include "laona.h"
 #include "face.h"
 #include "web.h"
+#include "wifi_setup.h"
 
 #define MAX_RETRY      5
 #define MAX_SCAN_APS   20
 #define NVS_NAMESPACE  "wifi"
+/* 송신 세기 상한 (0.25 dBm 단위, 최대 84 = 21 dBm). C3 SuperMini 처럼 안테나가 작은 보드는
+ * 최대 세기에서 오히려 패킷이 깨지는 일이 많아 낮춰 둔다 */
+#define TX_POWER_QDBM  84
 
 static bool s_started;
 static bool s_want_connected;   /* 사용자가 연결을 요청한 상태 (끊기면 재시도) */
@@ -33,6 +44,7 @@ static int s_last_reason;
 static esp_netif_t *s_netif;
 static wifi_ap_record_t s_aps[MAX_SCAN_APS];   /* 마지막 scan 결과 (번호로 연결할 때 사용) */
 static uint16_t s_num_aps;
+static int8_t s_tx_power = TX_POWER_QDBM;
 
 static void save_config(void)
 {
@@ -46,6 +58,16 @@ static void save_config(void)
     nvs_set_str(nvs, "pass", (char *)cfg.sta.password);
     nvs_commit(nvs);
     nvs_close(nvs);
+}
+
+static void off_task(void *arg)
+{
+    /* 설정 모드가 그사이 켜졌으면 (버튼) 끄지 않음 */
+    if (!wifi_setup_running() && !s_want_connected) {
+        wifi_off();
+        printf("[WiFi] off\n");
+    }
+    vTaskDelete(NULL);
 }
 
 static bool load_config(char *ssid, size_t ssid_len, char *pass, size_t pass_len)
@@ -65,6 +87,7 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *e = data;
         s_connected = false;
+        face_set_wifi(false);
         /* 다른 AP 로 바꾸려고 직접 끊은 경우 */
         if (e->reason == WIFI_REASON_ASSOC_LEAVE || !s_want_connected) {
             return;
@@ -77,29 +100,28 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
         } else {
             s_want_connected = false;
             printf("[WiFi] connect failed (reason %d)\n", e->reason);
+            /* 연결하지 못하면 와이파이를 끄고 얼굴만 (설정 QR 은 버튼으로만).
+             * 설정 모드 중이면 설정 페이지에서 다시 시도할 수 있게 그대로 둠.
+             * 이벤트 태스크 안에서 와이파이를 멈추지 않도록 따로 태스크에서 */
+            if (!wifi_setup_running()) {
+                xTaskCreate(off_task, "wifi_off", 3072, NULL, 5, NULL);
+            }
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *e = data;
         s_connected = true;
         s_retry = 0;
+        face_set_wifi(true);
         save_config();
         printf("[WiFi] connected, ip " IPSTR "\n", IP2STR(&e->ip_info.ip));
-        web_start();
-        /* 부팅 후 처음 연결되면 휴대폰 접속 주소 QR 을 잠깐 보여줌 */
-        static bool s_shown;
-        if (!s_shown) {
-            s_shown = true;
-            web_show_address();
-        }
+        /* 설정 모드 중이면 설정 모드가 끝날 때 웹서버를 시작하고 주소를 보여줌 (같은 80 포트) */
+        if (wifi_setup_running()) return;
+        web_start();   /* 접속 QR 은 버튼을 한 번 눌렀을 때 (touch.c) */
     }
 }
 
-/* 처음 호출될 때 초기화하고 RF 를 켠다 */
-static esp_err_t wifi_start(void)
+esp_err_t wifi_init(void)
 {
-    if (s_started) {
-        return ESP_OK;
-    }
     if (s_netif == NULL) {
         ESP_ERROR_CHECK(esp_netif_init());
         ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -113,12 +135,27 @@ static esp_err_t wifi_start(void)
         ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     }
+    return ESP_OK;
+}
+
+/* 처음 호출될 때 초기화하고 RF 를 켠다 */
+esp_err_t wifi_start(void)
+{
+    if (s_started) {
+        return ESP_OK;
+    }
+    wifi_init();
     esp_err_t err = esp_wifi_start();
     s_started = (err == ESP_OK);
+    if (s_started) {
+        /* 절전 (비콘 사이에 RF 를 끔) 을 끄면 휴대폰 요청에 바로 응답 (전원은 USB 라 소모 전류보다 반응 우선) */
+        esp_wifi_set_ps(WIFI_PS_NONE);
+        esp_wifi_set_max_tx_power(s_tx_power);
+    }
     return err;
 }
 
-static esp_err_t wifi_connect(const char *ssid, const char *password)
+esp_err_t wifi_connect(const char *ssid, const char *password)
 {
     esp_err_t err = wifi_start();
     if (err != ESP_OK) {
@@ -151,23 +188,66 @@ bool wifi_get_ip(char *buf, size_t len)
     return true;
 }
 
+void wifi_off(void)
+{
+    if (!s_started) {
+        return;
+    }
+    s_want_connected = false;
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    s_started = false;
+    s_connected = false;
+    face_set_wifi(false);
+}
+
+int wifi_scan(wifi_ap_record_t *aps, uint16_t max)
+{
+    if (wifi_start() != ESP_OK || esp_wifi_scan_start(NULL, true) != ESP_OK) {
+        return -1;
+    }
+    esp_wifi_scan_get_ap_records(&max, aps);
+    return max;
+}
+
+wifi_conn_state_t wifi_get_state(void)
+{
+    if (!s_started) return WIFI_CONN_OFF;
+    if (s_connected) return WIFI_CONN_CONNECTED;
+    if (s_want_connected) return WIFI_CONN_CONNECTING;
+    if (s_last_reason) return WIFI_CONN_FAILED;
+    return WIFI_CONN_IDLE;
+}
+
+int wifi_get_last_reason(void)
+{
+    return s_last_reason;
+}
+
+bool wifi_has_saved(void)
+{
+    char ssid[33], pass[65];
+    return load_config(ssid, sizeof(ssid), pass, sizeof(pass)) && ssid[0];
+}
+
 void wifi_autoconnect(void)
 {
     char ssid[33], pass[65];
-    if (load_config(ssid, sizeof(ssid), pass, sizeof(pass))) {
+    if (load_config(ssid, sizeof(ssid), pass, sizeof(pass)) && ssid[0]) {
         wifi_connect(ssid, pass);
+    } else {
+        printf("[WiFi] no saved WiFi (hold button 3s for WiFi setup)\n");
     }
 }
 
 static int cmd_scan(void)
 {
     printf("[WiFi] scanning...\n");
-    uint16_t num = MAX_SCAN_APS;
-    if (wifi_start() != ESP_OK || esp_wifi_scan_start(NULL, true) != ESP_OK) {
+    int num = wifi_scan(s_aps, MAX_SCAN_APS);
+    if (num < 0) {
         printf("[WiFi] scan failed\n");
         return 1;
     }
-    esp_wifi_scan_get_ap_records(&num, s_aps);
     s_num_aps = num;
     printf("%3s  %-32s %4s %3s %s\n", "NO", "SSID", "RSSI", "CH", "AUTH");
     for (int i = 0; i < s_num_aps; i++) {
@@ -195,11 +275,8 @@ static int cmd_disconnect(void)
         printf("[WiFi] already off\n");
         return 0;
     }
-    s_want_connected = false;
-    esp_wifi_disconnect();
-    esp_wifi_stop();
-    s_started = false;
-    s_connected = false;
+    wifi_setup_stop();
+    wifi_off();
     printf("[WiFi] off\n");
     return 0;
 }
@@ -207,6 +284,9 @@ static int cmd_disconnect(void)
 static int cmd_status(void)
 {
     char ssid[33], pass[65];
+    if (wifi_setup_running()) {
+        printf("Setup : AP \"%s\" password %s -> %s\n", wifi_setup_ap_ssid(), wifi_setup_ap_pass(), WIFI_SETUP_URL);
+    }
     printf("Saved : %s\n", load_config(ssid, sizeof(ssid), pass, sizeof(pass)) ? ssid : "(none)");
 
     if (!s_started) {
@@ -228,6 +308,18 @@ static int cmd_status(void)
     } else {
         printf("WiFi  : on, not connected\n");
     }
+    return 0;
+}
+
+static int cmd_txpower(int argc, char **argv)
+{
+    if (argc >= 3) {
+        s_tx_power = (int8_t)(atof(argv[2]) * 4);
+        if (s_started) esp_wifi_set_max_tx_power(s_tx_power);
+    }
+    int8_t q = s_tx_power;
+    if (s_started) esp_wifi_get_max_tx_power(&q);
+    printf("TX power: %.2f dBm\n", q / 4.0);
     return 0;
 }
 
@@ -261,10 +353,20 @@ static int cmd_wifi(int argc, char **argv)
     if (argc >= 2 && strcmp(argv[1], "status") == 0) {
         return cmd_status();
     }
+    if (argc >= 2 && strcmp(argv[1], "txpower") == 0) {
+        return cmd_txpower(argc, argv);
+    }
     if (argc >= 2 && strcmp(argv[1], "forget") == 0) {
         return cmd_forget();
     }
-    printf("usage: wifi scan | connect <ssid|no> [password] | disconnect | status | forget\n");
+    if (argc >= 2 && strcmp(argv[1], "setup") == 0) {
+        if (argc >= 3 && strcmp(argv[2], "stop") == 0) {
+            wifi_setup_stop();
+            return 0;
+        }
+        return wifi_setup_start() == ESP_OK ? 0 : 1;
+    }
+    printf("usage: wifi scan | connect <ssid|no> [password] | disconnect | status | txpower [dBm] | forget | setup [stop]\n");
     return 1;
 }
 
@@ -278,8 +380,10 @@ void wifi_register_commands(void)
                 "  wifi connect <no> [password]   : connect to AP number <no> of last scan\n"
                 "  wifi disconnect                : disconnect and turn off WiFi\n"
                 "  wifi status                    : show connection status\n"
-                "  wifi forget                    : erase saved WiFi config",
-        .hint = "<scan|connect|disconnect|status|forget>",
+                "  wifi txpower [dBm]             : show / set max TX power (2 ~ 21)\n"
+                "  wifi forget                    : erase saved WiFi config\n"
+                "  wifi setup [stop]              : phone setup mode (QR on screen) / stop it",
+        .hint = "<scan|connect|disconnect|status|txpower|forget|setup>",
         .func = &cmd_wifi,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));

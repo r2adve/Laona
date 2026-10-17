@@ -48,7 +48,8 @@ button.sub { background:transparent; color:var(--accent); border:1px solid var(-
   <select id="provider" onchange="sync(true)">
     <option value="anthropic">Claude (Anthropic)</option>
     <option value="chatgpt">ChatGPT (OpenAI)</option>
-    <option value="gemini">Gemini (Google)</option>
+    <option value="gemini_free">Google AI Studio 무료 (Gemini, 카드 등록 없음)</option>
+    <option value="gemini">Gemini (Google, 유료 결제 키)</option>
     <option value="openai">직접 입력 (Ollama, LM Studio 등 OpenAI 호환)</option>
   </select>
   <div class="hint" id="keyhelp"></div>
@@ -82,16 +83,19 @@ button.sub { background:transparent; color:var(--accent); border:1px solid var(-
 const $ = id => document.getElementById(id);
 let pw = '';
 // 첫 번째가 서비스를 고를 때 기본 모델. 목록에 없는 모델은 직접 입력하면 됨
+// gemini_free 는 화면에서만 나누는 항목 (기기에는 gemini 로 저장, 무료 모델이면 다시 이 항목으로 보여줌)
 const MODELS = {
   anthropic: [['claude-opus-5-5', '가장 똑똑해요'], ['claude-sonnet-5-5', '빠르고 똑똑해요'], ['claude-haiku-5-5', '가장 저렴하고 빨라요']],
   chatgpt: [['gpt-6.1-sol', '성능과 가격의 균형'], ['gpt-6-astra', '가장 똑똑해요'], ['gpt-6-luna', '가장 저렴하고 빨라요']],
-  gemini: [['gemini-3.7-flash', '빠르고 똑똑해요'], ['gemini-4-argon', '가장 똑똑해요'], ['gemini-3.5-flash-lite', '가장 저렴하고 빨라요']],
+  gemini_free: [['gemini-3.8-flash', '무료, 빠르고 똑똑해요'], ['gemini-3.5-flash-lite', '무료, 가장 빨라요']],
+  gemini: [['gemini-3.8-flash', '빠르고 똑똑해요'], ['gemini-4-argon', '가장 똑똑해요 (무료 없음)'], ['gemini-3.5-flash-lite', '가장 저렴하고 빨라요']],
   openai: [],
 };
 const KEYHELP = {
   anthropic: 'API 키는 console.anthropic.com 에서 발급받아요.',
   chatgpt: 'API 키는 platform.openai.com 에서 발급받아요. (ChatGPT 구독과는 별도로 요금이 나가요)',
-  gemini: 'API 키는 aistudio.google.com 에서 발급받아요.',
+  gemini_free: 'aistudio.google.com/apikey 에서 구글 계정으로 로그인 → "API 키 만들기". 카드 등록 없이 무료로 쓸 수 있어요. 하루 사용량이 정해져 있어서 다 쓰면 다음 날 (한국 시간 오후 4~5시) 다시 돼요. 무료 사용 중에는 대화 내용이 구글 서비스 개선에 쓰일 수 있어요.',
+  gemini: 'API 키는 aistudio.google.com 에서 발급받고, 결제(Billing)를 연결한 키를 써요. 결제를 연결하면 대화 내용이 구글 서비스 개선에 쓰이지 않아요.',
   openai: 'PC 에서 돌리는 Ollama, LM Studio 같은 서비스의 주소를 입력해요. 키가 없으면 비워 두세요.',
 };
 function show(id) { ['create', 'login', 'panel'].forEach(x => $(x).classList.toggle('hidden', x !== id)); }
@@ -119,7 +123,8 @@ async function api(path, body) {
 }
 async function load() {
   const c = await api('/api/config');
-  $('provider').value = c.provider; sync();
+  const free = c.provider === 'gemini' && MODELS.gemini_free.some(m => m[0] === c.model);
+  $('provider').value = free ? 'gemini_free' : c.provider; sync();
   $('model').value = c.model; $('base_url').value = c.base_url;
   $('api_key').value = ''; $('api_key').placeholder = c.key_hint ? `저장됨: ${c.key_hint} (바꿀 때만 입력)` : '키를 입력하세요';
   show('panel');
@@ -134,7 +139,7 @@ async function login() {
 }
 async function save() {
   try {
-    await api('/api/config', { provider: $('provider').value, model: $('model').value.trim(), base_url: $('base_url').value.trim(), api_key: $('api_key').value.trim() });
+    await api('/api/config', { provider: $('provider').value.replace('_free', ''), model: $('model').value.trim(), base_url: $('base_url').value.trim(), api_key: $('api_key').value.trim() });
     msg('sm', '저장했어요. 대화 페이지에서 말을 걸어 보세요!', true); await load();
   } catch (e) { msg('sm', e.message); }
 }

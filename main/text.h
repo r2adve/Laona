@@ -13,6 +13,7 @@
 bool text_init(const uint8_t *font, size_t len);   /* 글꼴 형식이 맞지 않으면 false */
 
 void text_show(const char *utf8);    /* 문장 표시 시작 */
+void text_show_ms(const char *utf8, int ms);   /* 짧은 문장 (두 줄 이내) 을 ms 동안만 표시 */
 void text_thinking(bool on);         /* "· · ·" 생각 중 표시 */
 void text_clear(void);
 bool text_active(void);              /* 글자 영역을 쓰는 중 */
