@@ -50,16 +50,83 @@
 
 ## 빌드와 다운로드
 
-[ESP-IDF v5.5](https://docs.espressif.com/projects/esp-idf/) 가 `~/esp/esp-idf` 에 설치되어 있다고 가정합니다.
+위의 하드웨어를 배선한 뒤 아래 순서대로 하면 됩니다. ESP-IDF 를 처음 쓰는 경우 1번에 시간이 가장 많이 걸립니다 (내려받기 포함 20~30분).
 
+### 1. ESP-IDF v5.5 설치 (처음 한 번)
+
+라오나는 Espressif 의 공식 개발 환경 [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/v5.5.4/esp32c3/get-started/) **v5.5** 로 빌드합니다. (v5.5.4 에서 확인)
+
+**Linux (Ubuntu / Debian)**
 ```bash
-~/esp/esp-idf/install.sh esp32c3   # 처음 한 번 (RISC-V 툴체인)
-make                               # 빌드 (mdns, qrcode 컴포넌트는 자동으로 내려받음)
-./fusing.sh                        # 다운로드 (기본 포트 /dev/ttyACM0)
+sudo apt-get install git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+mkdir -p ~/esp && cd ~/esp
+git clone -b v5.5.4 --recursive https://github.com/espressif/esp-idf.git
+~/esp/esp-idf/install.sh esp32c3
+sudo usermod -aG dialout $USER     # USB 포트 권한. 적용하려면 로그아웃 후 다시 로그인
 ```
 
-- 포트가 다르면 `PORT=/dev/ttyUSB0 ./fusing.sh`
-- 콘솔은 내장 USB 로 열립니다: `minicom -D /dev/ttyACM0` (다운로드 전에는 minicom 을 종료)
+**macOS**: `brew install cmake ninja dfu-util ccache` 후 위와 같이 `git clone` 과 `install.sh esp32c3` 를 실행합니다.
+
+**Windows**: [ESP-IDF 설치 프로그램](https://dl.espressif.com/dl/esp-idf/) 으로 v5.5 를 설치하고, 설치 후 생기는
+**ESP-IDF 5.5 CMD** (또는 PowerShell) 창에서 아래 명령을 실행합니다. `make` 와 `fusing.sh` 는 쓸 수 없으니 `idf.py` 명령을 쓰세요.
+
+### 2. 코드 내려받기
+
+```bash
+git clone https://github.com/r2adve/Laona.git
+cd Laona
+```
+
+### 3. 빌드
+
+```bash
+make                     # Linux / macOS (ESP-IDF 환경을 자동으로 불러옴)
+```
+또는 직접:
+```bash
+. ~/esp/esp-idf/export.sh  # 터미널을 열 때마다 한 번 (Windows 는 ESP-IDF CMD 창이면 생략)
+idf.py build
+```
+- 첫 빌드는 필요한 부품(mdns, qrcode 컴포넌트)을 인터넷에서 자동으로 내려받으므로 몇 분 걸립니다.
+- 칩 종류(esp32c3), 플래시 크기(4MB), 파티션 등의 설정은 `sdkconfig.defaults` 에 들어 있어 따로 설정할 것이 없습니다.
+- 끝에 `Project build complete` 가 나오면 성공입니다.
+
+### 4. 보드에 다운로드
+
+보드를 USB 케이블로 PC 에 연결합니다. (충전 전용 케이블은 안 됩니다. 데이터 케이블을 쓰세요)
+
+| OS | 포트 이름 예 |
+|---|---|
+| Linux | `/dev/ttyACM0` |
+| macOS | `/dev/cu.usbmodem1101` (`ls /dev/cu.*` 로 확인) |
+| Windows | `COM3` (장치 관리자 > 포트 에서 확인) |
+
+```bash
+./fusing.sh                          # Linux, 기본 포트 /dev/ttyACM0
+PORT=/dev/ttyUSB0 ./fusing.sh        # 포트가 다를 때
+idf.py -p COM3 flash                 # Windows / macOS 또는 직접
+```
+- 연결이 안 되면 (`Failed to connect`) 보드의 **BOOT 버튼을 누른 채로 RESET 버튼을 눌렀다 떼고**, BOOT 를 뗀 뒤 다시 다운로드하세요.
+  다운로드가 끝나면 RESET 을 한 번 눌러 주세요.
+
+### 5. 콘솔로 동작 확인
+
+```bash
+idf.py -p /dev/ttyACM0 monitor       # 끝내기: Ctrl + ]
+```
+(`minicom -D /dev/ttyACM0` 도 됩니다. 다운로드하기 전에는 콘솔 프로그램을 꼭 종료하세요)
+
+`Laona: 안녕하세요, Laona(라오나)예요.` 가 나오고 화면에 얼굴이 보이면 성공입니다. 콘솔에서 `help` 로 명령 목록을 볼 수 있습니다.
+
+### 잘 안 될 때
+
+| 증상 | 확인할 것 |
+|---|---|
+| 화면이 하얗거나 아무것도 안 나옴 | 배선 (특히 CS, DC, RESET, BL), LCD 전원 3.3V |
+| 빨강/파랑이 바뀌어 보임 | `main/lcd.c` 의 `MADCTL` 값에서 BGR 비트(0x08) |
+| 터치가 반대로 동작 | `main/touch.c` 의 `TOUCH_ACTIVE` 를 `0` 으로 |
+| 와이파이 공유기에 연결이 안 됨 (reason 2, 205) | 공유기 가까이에서 다시. 콘솔 `wifi txpower 13` 으로 송신 세기를 바꿔 보기 |
+| 포트 권한 오류 (Linux) | `dialout` 그룹 추가 후 다시 로그인 |
 
 ## 처음 설정
 
