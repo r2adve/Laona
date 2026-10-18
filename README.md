@@ -45,6 +45,9 @@
 | 3.3V / GND | VCC / GND | | | |
 
 - LCD 핀 이름의 SDA/SCL 은 I2C 가 아니라 SPI 의 데이터/클럭입니다.
+- ESP32-C3 SuperMini 는 보드의 파란 LED 가 GPIO8 (LCD CS), BOOT 버튼이 GPIO9 (LCD DC) 에 붙어 있습니다.
+  화면을 그리는 동안 LED 가 깜빡이는 것은 정상이고, 다운로드용 BOOT 버튼도 그대로 쓸 수 있습니다.
+- 남는 핀은 GPIO1, 3, 4, 5, 6 입니다 (모터, 센서 등을 더 달 때).
 - 터치 센서가 터치할 때 Low 를 내보내는 설정이면 `main/touch.c` 의 `TOUCH_ACTIVE` 를 `0` 으로 바꾸세요.
 - 빨강/파랑이 바뀌어 보이면 `main/lcd.c` 의 `MADCTL` 값에서 BGR 비트(0x08)를 조정하세요.
 
