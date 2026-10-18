@@ -59,11 +59,12 @@ button { font-size:16px; cursor:pointer; }
 <script>
 const $ = id => document.getElementById(id);
 const REASON = {
-  2: '비밀번호를 확인해 주세요.',
+  2: '공유기가 응답하지 않아요. 라오나를 공유기 가까이 두고 다시 해 보세요.',
   15: '비밀번호가 틀렸어요.',
   201: '와이파이를 찾지 못했어요. 이름과 거리를 확인해 주세요.',
   202: '비밀번호를 확인해 주세요.',
   204: '비밀번호가 틀렸어요.',
+  205: '공유기가 응답하지 않아요. 라오나를 공유기 가까이 두고 다시 해 보세요.',
 };
 const bars = r => r >= -55 ? '▂▄▆█' : r >= -67 ? '▂▄▆' : r >= -78 ? '▂▄' : '▂';
 
@@ -104,11 +105,10 @@ function poll() {
   fetch('/api/status').then(r => r.json()).then(st => {
     errors = 0;
     if (st.state === 'connected') {
-      const url = 'http://' + st.ip + '/';
-      status('연결됐어요!\n휴대폰이 집 와이파이로 돌아가면 라오나 화면의 QR 을 찍거나 아래 주소로 들어가세요.\n', 'good');
-      const a = document.createElement('a');
-      a.href = url; a.textContent = url;
-      $('status').appendChild(a);
+      /* 이 창 (안드로이드 "네트워크에 로그인" 창) 은 곧 꺼질 설정 와이파이에 묶여 있어서
+       * 여기서 대화 페이지 링크를 열면 "사이트에 연결할 수 없음" 이 된다. 링크 대신 안내만 */
+      status('연결됐어요!\n1) 이 창을 닫으세요.\n2) 휴대폰이 집 와이파이(' + $('ssid').value + ')에 다시 연결되면\n' +
+             '3) 라오나 화면에 나오는 QR 을 카메라로 찍으세요.\n(주소: http://' + st.ip + '/)', 'good');
       return;
     }
     if (st.state === 'failed') {

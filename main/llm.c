@@ -20,6 +20,8 @@
 #include "esp_console.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "esp_timer.h"
+#include "esp_system.h"
 #include "cJSON.h"
 #include "config.h"
 #include "face.h"
@@ -140,11 +142,17 @@ static char *http_post(const char *url, const header_t *headers, int nheaders, c
 
     char *resp = NULL;
     int len = strlen(body);
+    int64_t t0 = esp_timer_get_time();
     if (esp_http_client_open(c, len) != ESP_OK || esp_http_client_write(c, body, len) != len) {
         goto done;
     }
+    int64_t t1 = esp_timer_get_time();
     esp_http_client_fetch_headers(c);
     *status = esp_http_client_get_status_code(c);
+    /* 느려질 때 원인 구분: 연결 (DNS + TLS) / 서버가 대답을 만드는 시간 / 요청 크기 / 남은 메모리 */
+    printf("[LLM] connect %lld ms, server %lld ms, request %d bytes, heap %u (min %u)\n",
+           (t1 - t0) / 1000, (esp_timer_get_time() - t1) / 1000, len,
+           (unsigned)esp_get_free_heap_size(), (unsigned)esp_get_minimum_free_heap_size());
     resp = malloc(RESP_MAX);
     if (!resp) goto done;
     int total = 0, n;
@@ -299,17 +307,30 @@ static bool ask_openai(const llm_config_t *cfg, const char *input, char **raw, c
     cJSON_AddItemToArray(messages, sys);
     add_history(messages, input);
 
-    char *body = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!body) { *err = "메모리가 부족해요."; return false; }
-
     char url[160], auth[280];
     snprintf(url, sizeof(url), "%s/chat/completions", config_base_url(cfg));
     snprintf(auth, sizeof(auth), "Bearer %s", cfg->api_key);
     header_t headers[] = { { "Authorization", auth } };
+
+    /* Gemini 는 기본으로 오래 생각한 뒤 대답해서 느림. 짧은 잡담이라 생각은 적게.
+     * 생각 정도를 고를 수 없는 모델이면 400 으로 거절되므로 그때는 빼고 다시 보냄 */
+    bool effort = cfg->provider == LLM_GEMINI;
+    if (effort) cJSON_AddStringToObject(root, "reasoning_effort", "low");
     int status;
-    char *resp = http_post(url, headers, cfg->api_key[0] ? 1 : 0, body, &status);
-    free(body);
+    char *resp = NULL;
+    for (;;) {
+        char *body = cJSON_PrintUnformatted(root);
+        if (!body) { cJSON_Delete(root); *err = "메모리가 부족해요."; return false; }
+        resp = http_post(url, headers, cfg->api_key[0] ? 1 : 0, body, &status);
+        free(body);
+        if (status != 400 || !effort) break;
+        log_error(status, resp);
+        free(resp);
+        printf("[LLM] retry without reasoning_effort\n");
+        cJSON_DeleteItemFromObject(root, "reasoning_effort");
+        effort = false;
+    }
+    cJSON_Delete(root);
     if (status != 200) {
         log_error(status, resp);
         *err = error_text(status);
@@ -354,8 +375,10 @@ static void llm_task(void *arg)
 
         char *raw = NULL;
         const char *err = NULL;
+        int64_t t0 = esp_timer_get_time();
         bool ok = cfg.provider == LLM_ANTHROPIC ? ask_anthropic(&cfg, input, &raw, &err)
                                                 : ask_openai(&cfg, input, &raw, &err);
+        printf("[LLM] %s in %lld ms\n", ok ? "reply" : "error", (esp_timer_get_time() - t0) / 1000);
         if (ok) {
             char emotion[16], text[400];
             parse_reply(raw, emotion, sizeof(emotion), text, sizeof(text));

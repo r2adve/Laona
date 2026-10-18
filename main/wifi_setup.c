@@ -1,19 +1,24 @@
 /*
  * 휴대폰으로 와이파이 설정 - SoftAP + 캡티브 포털 + 화면 QR
  *
- *   설정용 와이파이 "Laona-XXXX" (WPA2, 켤 때마다 바뀌는 8자리 숫자 비밀번호)
+ *   설정용 와이파이 "Laona-XXXX" (WPA2, 8자리 숫자 비밀번호)
  *     비밀번호를 거는 이유: 휴대폰에서 입력하는 집 와이파이 비밀번호가 공중에 그대로 보이지 않게.
  *     비밀번호는 QR 안에 들어 있어서 사용자가 입력할 일은 거의 없다.
+ *     처음 한 번 무작위로 만들어 NVS 에 저장하고 계속 같은 것을 쓴다. 켤 때마다 바꾸면 휴대폰에
+ *     지난번 비밀번호로 저장된 같은 이름의 네트워크 때문에 두 번째부터는 접속하지 못한다.
  *   화면 QR
  *     1) WIFI:T:WPA;S:Laona-XXXX;P:12345678;;  -> 휴대폰 카메라로 찍으면 바로 접속
  *     2) http://4.3.2.1/                       -> 휴대폰이 접속하면 자동으로 바뀜 (설정 창이 안 뜰 때)
+ *        갤럭시는 카메라 QR 로 접속하면 설정 창 대신 "네트워크에 로그인" 알림만 띄우므로 알림을 누르라고 안내.
+ *        설정 > 연결 > Wi-Fi 화면의 QR 스캔 아이콘으로 찍으면 직접 고른 네트워크가 되어 설정 창이 바로 뜬다.
  *     터치하면 1) <-> 2) 전환
  *   DNS  : 모든 질의에 4.3.2.1 로 응답 -> 휴대폰이 로그인 페이지 (설정 페이지) 를 저절로 띄움
  *   HTTP : GET / 설정 페이지, GET /api/scan, POST /api/connect, GET /api/status, 그 외는 / 로
  *
  *   버튼을 3초 눌렀을 때만 켜진다 (touch.c).
  *   설정 와이파이에 접속한 휴대폰이 없는 채로 1분이 지나면 꺼진다 (휴대폰이 접속해 있는 동안은 기다림).
- *   연결되면 QR 을 닫고 기쁜 표정 + "와이파이에 연결됐어요!" 3초, 잠시 뒤 (휴대폰에 결과를 보여준 뒤) 설정 모드를 끈다.
+ *   연결되면 QR 을 닫고 기쁜 표정 + "와이파이에 연결됐어요!" 3초, 잠시 뒤 (휴대폰에 결과를 보여준 뒤) 설정 모드를 끄고
+ *   대화 페이지 접속 QR 을 띄운다.
  *   연결되지 않은 채로 끝나면 와이파이를 끈다.
  *
  *   주의 (default/ 프로젝트에서 확인): 설정 AP 주소를 192.168.4.1 로 바꾸거나 DHCP 옵션 114 를
@@ -33,6 +38,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "lwip/sockets.h"
+#include "nvs.h"
 #include "face.h"
 #include "laona.h"
 #include "web.h"
@@ -44,6 +50,7 @@
 #define DONE_TEXT_MS       3000                /* 연결 성공 문구 표시 시간 */
 #define QR_MS              (60 * 60 * 1000)    /* 표시 시간은 setup_task 가 정함 (끝날 때 닫음) */
 #define MAX_SCAN_APS       20
+#define NVS_NAMESPACE      "wifi_setup"
 
 extern const char setup_html[] asm("_binary_setup_html_start");
 
@@ -60,6 +67,28 @@ static esp_netif_t *s_ap_netif;
 static int s_dns_sock = -1;
 static char s_ap_ssid[16], s_ap_pass[9];
 
+static void random_pass(void)
+{
+    snprintf(s_ap_pass, sizeof(s_ap_pass), "%08lu", (unsigned long)(esp_random() % 100000000));
+}
+
+/* 설정 와이파이 비밀번호: 처음 한 번 만들어 저장해 두고 계속 같은 것을 씀 */
+static void load_ap_pass(void)
+{
+    nvs_handle_t nvs;
+    size_t len = sizeof(s_ap_pass);
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        random_pass();
+        return;
+    }
+    if (nvs_get_str(nvs, "pass", s_ap_pass, &len) != ESP_OK || strlen(s_ap_pass) != 8) {
+        random_pass();
+        nvs_set_str(nvs, "pass", s_ap_pass);
+        nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+}
+
 /* ---------------------------------------------------------------- 화면 */
 
 static void show_qr(int page)
@@ -70,6 +99,10 @@ static void show_qr(int page)
         snprintf(text, sizeof(text), "WIFI:T:WPA;S:%s;P:%s;;", s_ap_ssid, s_ap_pass);
         snprintf(line2, sizeof(line2), "암호 %s", s_ap_pass);
         face_show_qr(text, "QR을 찍어 연결해요", line2, QR_MS);
+    } else if (s_phone_joined) {
+        /* 갤럭시 등 안드로이드는 카메라 QR 로 접속하면 설정 창을 바로 띄우지 않고
+         * "네트워크에 로그인" 알림만 띄운다 (와이파이 설정 화면에서 직접 고른 네트워크만 자동으로 띄움) */
+        face_show_qr(WIFI_SETUP_URL, "알림을 눌러 주세요", "또는 이 QR을 찍어요", QR_MS);
     } else {
         face_show_qr(WIFI_SETUP_URL, "설정 창이 안 뜨면", "이 QR을 찍어요", QR_MS);
     }
@@ -86,8 +119,9 @@ static void ap_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     if (!s_running) return;
     if (id == WIFI_EVENT_AP_STACONNECTED) {
         printf("[Setup] phone joined\n");
-        if (!s_phone_joined && !s_page_opened) show_qr(1);
+        bool first = !s_phone_joined;
         s_phone_joined = true;
+        if (first && !s_page_opened) show_qr(1);
     }
 }
 
@@ -332,8 +366,9 @@ static void cleanup(void)
 
     if (wifi_get_state() == WIFI_CONN_CONNECTED) {
         /* 설정 중에는 80 포트를 설정 페이지가 쓰고 있어서 미뤄 둔 대화 페이지 시작.
-         * 접속 QR 은 버튼을 한 번 눌렀을 때 */
+         * 휴대폰이 집 와이파이로 돌아가면 바로 찍을 수 있게 접속 QR 도 띄움 */
         web_start();
+        web_show_address();
     } else {
         wifi_off();   /* 연결 안 됨 -> 와이파이를 끄고 얼굴만 */
         printf("[WiFi] off\n");
@@ -367,7 +402,11 @@ static void setup_task(void *arg)
                 face_say_ms("happy", "와이파이에 연결됐어요!", DONE_TEXT_MS);
             } else if (st == WIFI_CONN_FAILED) {
                 face_thinking(false);
-                face_say("sad", "연결하지 못했어요. 비밀번호를 확인해 주세요.");
+                /* 2 (AUTH_EXPIRE), 205 (CONNECTION_FAIL): 비밀번호 확인 전에 공유기가 응답하지 않음 */
+                int reason = wifi_get_last_reason();
+                face_say("sad", reason == 2 || reason == 205
+                                ? "공유기가 응답하지 않아요. 가까이에서 다시 해 주세요."
+                                : "연결하지 못했어요. 비밀번호를 확인해 주세요.");
             }
         }
         last = st;
@@ -417,7 +456,7 @@ esp_err_t wifi_setup_start(void)
     uint8_t mac[6];
     esp_wifi_get_mac(WIFI_IF_AP, mac);
     snprintf(s_ap_ssid, sizeof(s_ap_ssid), "%s-%02X%02X", LAONA_NAME, mac[4], mac[5]);
-    snprintf(s_ap_pass, sizeof(s_ap_pass), "%08lu", (unsigned long)(esp_random() % 100000000));
+    load_ap_pass();
 
     wifi_config_t ap = {
         .ap = {

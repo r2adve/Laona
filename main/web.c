@@ -243,6 +243,9 @@ void web_start(void)
     if (s_server) return;
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.max_uri_handlers = 10;
+    /* lwIP 소켓 10개 = httpd 내부 3 + 클라이언트 5 + AI 서버 HTTPS 1 + 여유 1.
+     * 기본값 7 이면 브라우저가 연결을 여러 개 열 때 AI 호출 소켓이 모자라거나 접속이 거절됨 */
+    cfg.max_open_sockets = 5;
     cfg.stack_size = 6144;
     cfg.lru_purge_enable = true;
     if (httpd_start(&s_server, &cfg) != ESP_OK) {

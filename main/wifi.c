@@ -33,8 +33,8 @@
 #define MAX_SCAN_APS   20
 #define NVS_NAMESPACE  "wifi"
 /* 송신 세기 상한 (0.25 dBm 단위, 최대 84 = 21 dBm). C3 SuperMini 처럼 안테나가 작은 보드는
- * 최대 세기에서 오히려 패킷이 깨지는 일이 많아 낮춰 둔다 */
-#define TX_POWER_QDBM  84
+ * 최대 세기에서 오히려 패킷이 깨지는 일이 많아 8.5 dBm 으로 낮춰 둔다 (공유기 인증 응답 없음 reason 2/205) */
+#define TX_POWER_QDBM  34
 
 static bool s_started;
 static bool s_want_connected;   /* 사용자가 연결을 요청한 상태 (끊기면 재시도) */
@@ -58,6 +58,21 @@ static void save_config(void)
     nvs_set_str(nvs, "pass", (char *)cfg.sta.password);
     nvs_commit(nvs);
     nvs_close(nvs);
+}
+
+/* 공유기가 알려준 DNS 가 응답하지 않을 때를 대비해 예비 DNS 를 넣고, 쓰는 DNS 를 로그로 */
+static void setup_dns(void)
+{
+    esp_netif_dns_info_t dns = { .ip.type = ESP_IPADDR_TYPE_V4 };
+    dns.ip.u_addr.ip4.addr = ESP_IP4TOADDR(8, 8, 8, 8);
+    esp_netif_set_dns_info(s_netif, ESP_NETIF_DNS_FALLBACK, &dns);
+    printf("[WiFi] DNS");
+    for (int i = ESP_NETIF_DNS_MAIN; i <= ESP_NETIF_DNS_FALLBACK; i++) {
+        if (esp_netif_get_dns_info(s_netif, i, &dns) == ESP_OK) {
+            printf(" " IPSTR, IP2STR(&dns.ip.u_addr.ip4));
+        }
+    }
+    printf("\n");
 }
 
 static void off_task(void *arg)
@@ -114,6 +129,7 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
         face_set_wifi(true);
         save_config();
         printf("[WiFi] connected, ip " IPSTR "\n", IP2STR(&e->ip_info.ip));
+        setup_dns();
         /* 설정 모드 중이면 설정 모드가 끝날 때 웹서버를 시작하고 주소를 보여줌 (같은 80 포트) */
         if (wifi_setup_running()) return;
         web_start();   /* 접속 QR 은 버튼을 한 번 눌렀을 때 (touch.c) */
@@ -301,6 +317,14 @@ static int cmd_status(void)
         printf("  RSSI    : %d dBm\n", ap.rssi);
         printf("  IP      : " IPSTR "\n", IP2STR(&ip.ip));
         printf("  Gateway : " IPSTR "\n", IP2STR(&ip.gw));
+        esp_netif_dns_info_t dns;
+        printf("  DNS     :");
+        for (int i = ESP_NETIF_DNS_MAIN; i <= ESP_NETIF_DNS_FALLBACK; i++) {
+            if (esp_netif_get_dns_info(s_netif, i, &dns) == ESP_OK) {
+                printf(" " IPSTR, IP2STR(&dns.ip.u_addr.ip4));
+            }
+        }
+        printf("\n");
     } else if (s_want_connected) {
         printf("WiFi  : connecting\n");
     } else if (s_last_reason) {

@@ -1,9 +1,9 @@
 /*
  * 1.8" TFT 128x160 (ST7735S) SPI 드라이버 - 가로 방향 (160x128) 으로 사용
  *
- *   GPIO0 -- RESET    GPIO8 -- SDA (MOSI)
- *   GPIO1 -- DC       GPIO9 -- SCL (SCLK)
- *   GPIO2 -- CS       GPIO3 -- BL (백라이트, High = 켜짐)
+ *   GPIO10 -- RESET   GPIO20 -- SDA (MOSI)
+ *   GPIO9  -- DC      GPIO21 -- SCK (SCLK)
+ *   GPIO8  -- CS      GPIO7  -- BL (백라이트, High = 켜짐)
  *
  * 콘솔 명령
  *   lcdout <color>   : 얼굴 표시를 멈추고 화면 전체를 색으로 채움
@@ -22,12 +22,12 @@
 #include "lcd.h"
 #include "face.h"
 
-#define PIN_RST   GPIO_NUM_0
-#define PIN_DC    GPIO_NUM_1
-#define PIN_CS    GPIO_NUM_2
-#define PIN_BL    GPIO_NUM_3
-#define PIN_MOSI  GPIO_NUM_8
-#define PIN_SCLK  GPIO_NUM_9
+#define PIN_RST   GPIO_NUM_10
+#define PIN_DC    GPIO_NUM_9
+#define PIN_CS    GPIO_NUM_8
+#define PIN_BL    GPIO_NUM_7
+#define PIN_MOSI  GPIO_NUM_20
+#define PIN_SCLK  GPIO_NUM_21
 
 #define LCD_HOST      SPI2_HOST
 #define LCD_SPI_HZ    (20 * 1000 * 1000)

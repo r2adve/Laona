@@ -1,5 +1,5 @@
 /*
- * 터치 센서 (GPIO4, TTP223 같은 디지털 출력 모듈)
+ * 터치 센서 (GPIO2, TTP223 같은 디지털 출력 모듈)
  *
  *   한 번 터치        : 얼굴 스타일 바꾸기 (kao <-> eyes)
  *   빠르게 두 번 터치 : 흑백 반전
@@ -9,7 +9,7 @@
  *
  *   화면이 꺼져 있을 때는 길게 누르기만 받는다.
  *
- * 택트 스위치 (GPIO5, 누르면 GND 에 붙음. 내부 풀업이라 누르면 Low)
+ * 택트 스위치 (GPIO0, 누르면 GND 에 붙음. 내부 풀업이라 누르면 Low)
  *   한 번 누름        : 대화창 접속 주소 QR (와이파이에 연결되어 있을 때만. 1분 또는 휴대폰이 접속하면 닫힘)
  *                       QR 이 떠 있으면 닫음
  *   3초 이상 누름     : 와이파이 설정 QR (누르고 있는 중 3초가 되는 순간 동작. 화면이 꺼져 있어도 켜짐)
@@ -27,10 +27,10 @@
 #include "wifi.h"
 #include "wifi_setup.h"
 
-#define PIN_TOUCH     GPIO_NUM_4
+#define PIN_TOUCH     GPIO_NUM_2
 #define TOUCH_ACTIVE  1       /* 터치 시 출력 레벨. TTP223 기본은 High (A 점퍼를 붙이면 Low) */
 
-#define PIN_BUTTON    GPIO_NUM_5
+#define PIN_BUTTON    GPIO_NUM_0
 #define BUTTON_LONG_MS 3000   /* 버튼 길게 누르기 -> 와이파이 설정 */
 
 #define POLL_MS       10
